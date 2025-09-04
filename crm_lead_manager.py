@@ -130,7 +130,7 @@ with st.sidebar:
                     "value": value, "tags": tags, "notes": notes
                 })
                 st.success(f"Lead '{name}' added.")
-                st.experimental_rerun()
+                st.rerun()
 
 # Tabs
 tab1, tab2, tab3 = st.tabs(["Leads", "Analytics", "Import/Export"])
@@ -173,12 +173,12 @@ with tab1:
                                 "notes": new_notes
                             })
                             st.success(f"Updated lead: {row['name']}")
-                            st.experimental_rerun()
+                            st.rerun()
             with col4:
                 if st.button("🗑️ Delete", key=f"del{row['id']}"):
                     delete_lead(int(row["id"]))
                     st.success(f"Deleted lead: {row['name']}")
-                    st.experimental_rerun()
+                    st.rerun()
 
 # --- Analytics Tab ---
 with tab2:
@@ -205,6 +205,6 @@ with tab3:
             with closing(sqlite3.connect(DB_PATH)) as conn:
                 new.to_sql("leads", conn, if_exists="append", index=False)
             st.success("CSV imported successfully")
-            st.experimental_rerun()
+            st.rerun()
         except Exception as e:
             st.error(f"Import failed: {e}")
