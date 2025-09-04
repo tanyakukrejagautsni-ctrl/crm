@@ -151,6 +151,10 @@ with tab1:
     if df.empty:
         st.info("No leads yet.")
     else:
+        # Track editing state
+        if "edit_id" not in st.session_state:
+            st.session_state.edit_id = None
+
         for _, row in df.iterrows():
             col1, col2, col3, col4 = st.columns([3, 1, 1, 1])
             with col1:
@@ -159,27 +163,38 @@ with tab1:
                 st.write(f"💰 {row['value']}")
             with col3:
                 if st.button("✏️ Edit", key=f"edit{row['id']}"):
-                    with st.expander(f"Edit Lead: {row['name']}", expanded=True):
-                        with st.form(f"edit_form_{row['id']}"):
-                            new_status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
-                            new_value = st.number_input("Deal Value", min_value=0.0, step=100.0, value=float(row["value"]))
-                            new_owner = st.text_input("Owner", value=row["owner"])
-                            new_notes = st.text_area("Notes", value=row["notes"] or "")
-                            save_changes = st.form_submit_button("Save Changes")
-                            if save_changes:
-                                update_lead(int(row["id"]), {
-                                    "status": new_status,
-                                    "value": new_value,
-                                    "owner": new_owner,
-                                    "notes": new_notes
-                                })
-                                st.success(f"Updated lead: {row['name']}")
-                                st.rerun()
+                    st.session_state.edit_id = row["id"]
             with col4:
                 if st.button("🗑️ Delete", key=f"del{row['id']}"):
                     delete_lead(int(row["id"]))
                     st.success(f"Deleted lead: {row['name']}")
                     st.rerun()
+
+            # Show edit form if this lead is selected
+            if st.session_state.edit_id == row["id"]:
+                st.markdown("---")
+                with st.form(f"edit_form_{row['id']}"):
+                    new_name = st.text_input("Name", value=row["name"])
+                    new_email = st.text_input("Email", value=row["email"] or "")
+                    new_company = st.text_input("Company", value=row["company"] or "")
+                    new_status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
+                    new_value = st.number_input("Deal Value", min_value=0.0, step=100.0, value=float(row["value"]))
+                    new_owner = st.text_input("Owner", value=row["owner"] or "")
+                    new_notes = st.text_area("Notes", value=row["notes"] or "")
+                    save_changes = st.form_submit_button("💾 Save Changes")
+                    if save_changes:
+                        update_lead(int(row["id"]), {
+                            "name": new_name,
+                            "email": new_email,
+                            "company": new_company,
+                            "status": new_status,
+                            "value": new_value,
+                            "owner": new_owner,
+                            "notes": new_notes
+                        })
+                        st.success(f"Updated lead: {new_name}")
+                        st.session_state.edit_id = None
+                        st.rerun()
 
 # --- Analytics Tab ---
 with tab2:
