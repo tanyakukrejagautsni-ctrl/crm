@@ -159,21 +159,22 @@ with tab1:
                 st.write(f"💰 {row['value']}")
             with col3:
                 if st.button("✏️ Edit", key=f"edit{row['id']}"):
-                    with st.form(f"edit_form_{row['id']}"):
-                        new_status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
-                        new_value = st.number_input("Deal Value", min_value=0.0, step=100.0, value=float(row["value"]))
-                        new_owner = st.text_input("Owner", value=row["owner"])
-                        new_notes = st.text_area("Notes", value=row["notes"] or "")
-                        saved = st.form_submit_button("Save Changes")
-                        if saved:
-                            update_lead(int(row["id"]), {
-                                "status": new_status,
-                                "value": new_value,
-                                "owner": new_owner,
-                                "notes": new_notes
-                            })
-                            st.success(f"Updated lead: {row['name']}")
-                            st.rerun()
+                    with st.expander(f"Edit Lead: {row['name']}", expanded=True):
+                        with st.form(f"edit_form_{row['id']}"):
+                            new_status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
+                            new_value = st.number_input("Deal Value", min_value=0.0, step=100.0, value=float(row["value"]))
+                            new_owner = st.text_input("Owner", value=row["owner"])
+                            new_notes = st.text_area("Notes", value=row["notes"] or "")
+                            save_changes = st.form_submit_button("Save Changes")
+                            if save_changes:
+                                update_lead(int(row["id"]), {
+                                    "status": new_status,
+                                    "value": new_value,
+                                    "owner": new_owner,
+                                    "notes": new_notes
+                                })
+                                st.success(f"Updated lead: {row['name']}")
+                                st.rerun()
             with col4:
                 if st.button("🗑️ Delete", key=f"del{row['id']}"):
                     delete_lead(int(row["id"]))
