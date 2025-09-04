@@ -36,8 +36,7 @@ def _now():
 
 def add_lead(data: dict):
     with closing(sqlite3.connect(DB_PATH)) as conn:
-        cur = conn.cursor()
-        cur.execute("""
+        conn.execute("""
             INSERT INTO leads (name, email, phone, company, source, owner, status, value, tags, notes, created_at, updated_at)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
@@ -151,7 +150,6 @@ with tab1:
     if df.empty:
         st.info("No leads yet.")
     else:
-        # Track editing state
         if "edit_id" not in st.session_state:
             st.session_state.edit_id = None
 
@@ -170,26 +168,31 @@ with tab1:
                     st.success(f"Deleted lead: {row['name']}")
                     st.rerun()
 
-            # Show edit form if this lead is selected
             if st.session_state.edit_id == row["id"]:
                 st.markdown("---")
                 with st.form(f"edit_form_{row['id']}"):
                     new_name = st.text_input("Name", value=row["name"])
                     new_email = st.text_input("Email", value=row["email"] or "")
+                    new_phone = st.text_input("Phone", value=row["phone"] or "")
                     new_company = st.text_input("Company", value=row["company"] or "")
+                    new_source = st.selectbox("Source", SOURCES, index=SOURCES.index(row["source"]) if row["source"] in SOURCES else 0)
+                    new_owner = st.text_input("Owner", value=row["owner"] or "")
                     new_status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
                     new_value = st.number_input("Deal Value", min_value=0.0, step=100.0, value=float(row["value"]))
-                    new_owner = st.text_input("Owner", value=row["owner"] or "")
+                    new_tags = st.text_input("Tags", value=row["tags"] or "")
                     new_notes = st.text_area("Notes", value=row["notes"] or "")
                     save_changes = st.form_submit_button("💾 Save Changes")
                     if save_changes:
                         update_lead(int(row["id"]), {
                             "name": new_name,
                             "email": new_email,
+                            "phone": new_phone,
                             "company": new_company,
+                            "source": new_source,
+                            "owner": new_owner,
                             "status": new_status,
                             "value": new_value,
-                            "owner": new_owner,
+                            "tags": new_tags,
                             "notes": new_notes
                         })
                         st.success(f"Updated lead: {new_name}")
