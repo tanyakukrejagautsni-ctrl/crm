@@ -4,6 +4,7 @@ from datetime import datetime, date, time
 import pandas as pd
 import streamlit as st
 import uuid
+import random
 
 DB_PATH = "enhanced_leads.db"
 
@@ -15,7 +16,11 @@ def _now():
     return datetime.utcnow().isoformat(timespec="seconds")
 
 def _generate_ref():
-    return "REF-" + uuid.uuid4().hex[:8].upper()
+    """Generate reference in format GDC-XX-DDMMYYYY"""
+    today = datetime.now()
+    random_numbers = f"{random.randint(10, 99):02d}"
+    date_part = today.strftime("%d%m%Y")
+    return f"GDC-{random_numbers}-{date_part}"
 
 def format_datetime(dt_str):
     """Format datetime string for display"""
@@ -26,6 +31,22 @@ def format_datetime(dt_str):
         return dt.strftime("%Y-%m-%d %H:%M")
     except:
         return dt_str
+
+def format_address(street, city, state, zip_code, country):
+    """Format address components into a readable address"""
+    address_parts = []
+    if street:
+        address_parts.append(street)
+    if city:
+        address_parts.append(city)
+    if state:
+        address_parts.append(state)
+    if zip_code:
+        address_parts.append(zip_code)
+    if country:
+        address_parts.append(country)
+    
+    return ", ".join(filter(None, address_parts)) if address_parts else ""
 
 # ---------- Database Initialization with Migration ----------
 def init_db():
@@ -41,6 +62,12 @@ def init_db():
                     email TEXT,
                     phone TEXT,
                     place TEXT,
+                    street_address TEXT,
+                    city TEXT,
+                    state TEXT,
+                    zip_code TEXT,
+                    country TEXT,
+                    full_address TEXT,
                     source TEXT,
                     owner TEXT,
                     status TEXT DEFAULT 'New',
@@ -63,11 +90,31 @@ def init_db():
         # Add missing columns
         if "place" not in cols:
             conn.execute("ALTER TABLE leads ADD COLUMN place TEXT;")
+        if "street_address" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN street_address TEXT;")
+        if "city" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN city TEXT;")
+        if "state" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN state TEXT;")
+        if "zip_code" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN zip_code TEXT;")
+        if "country" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN country TEXT;")
+        if "full_address" not in cols:
+            conn.execute("ALTER TABLE leads ADD COLUMN full_address TEXT;")
+        
         if "ref_number" not in cols:
             conn.execute("ALTER TABLE leads ADD COLUMN ref_number TEXT;")
             cur.execute("SELECT id FROM leads WHERE ref_number IS NULL OR ref_number=''")
             for rid, in cur.fetchall():
                 conn.execute("UPDATE leads SET ref_number=? WHERE id=?", (_generate_ref(), rid))
+        else:
+            # Update existing reference numbers to new format if they don't match
+            cur.execute("SELECT id, ref_number FROM leads")
+            for rid, ref_num in cur.fetchall():
+                if not ref_num or not ref_num.startswith("GDC-"):
+                    conn.execute("UPDATE leads SET ref_number=? WHERE id=?", (_generate_ref(), rid))
+        
         if "created_at" not in cols:
             conn.execute("ALTER TABLE leads ADD COLUMN created_at TEXT;")
             conn.execute("UPDATE leads SET created_at=?", (_now(),))
@@ -84,17 +131,33 @@ def init_db():
 # ---------- CRUD ----------
 def add_lead(data: dict):
     with closing(sqlite3.connect(DB_PATH)) as conn:
+        # Format the full address
+        full_address = format_address(
+            data.get("street_address"),
+            data.get("city"),
+            data.get("state"),
+            data.get("zip_code"),
+            data.get("country")
+        )
+        
         conn.execute("""
             INSERT INTO leads
-            (ref_number, name, email, phone, place, source, owner, status, value, tags, notes, 
+            (ref_number, name, email, phone, place, street_address, city, state, zip_code, 
+             country, full_address, source, owner, status, value, tags, notes, 
              preferred_date, preferred_time, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             data.get("ref_number") or _generate_ref(),
             data.get("name"),
             data.get("email"),
             data.get("phone"),
             data.get("place"),
+            data.get("street_address"),
+            data.get("city"),
+            data.get("state"),
+            data.get("zip_code"),
+            data.get("country"),
+            full_address,
             data.get("source"),
             data.get("owner"),
             data.get("status", "New"),
@@ -111,6 +174,21 @@ def add_lead(data: dict):
 def update_lead(lead_id: int, updates: dict):
     if not updates:
         return
+    
+    # If any address component is updated, recalculate full_address
+    address_fields = ["street_address", "city", "state", "zip_code", "country"]
+    if any(field in updates for field in address_fields):
+        # Get current address data
+        current_lead = get_lead_by_id(lead_id)
+        if current_lead:
+            street = updates.get("street_address", current_lead.get("street_address"))
+            city = updates.get("city", current_lead.get("city"))
+            state = updates.get("state", current_lead.get("state"))
+            zip_code = updates.get("zip_code", current_lead.get("zip_code"))
+            country = updates.get("country", current_lead.get("country"))
+            
+            updates["full_address"] = format_address(street, city, state, zip_code, country)
+    
     set_clause = ", ".join([f"{k}=?" for k in updates.keys()])
     params = list(updates.values()) + [_now(), lead_id]
     with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -127,8 +205,8 @@ def fetch_leads(filters: dict = None) -> pd.DataFrame:
     clauses, params = [], []
     if filters.get("q"):
         q = f"%{filters['q']}%"
-        clauses.append("(name LIKE ? OR email LIKE ? OR place LIKE ? OR owner LIKE ? OR tags LIKE ? OR notes LIKE ? OR ref_number LIKE ?)")
-        params += [q, q, q, q, q, q, q]
+        clauses.append("(name LIKE ? OR email LIKE ? OR place LIKE ? OR owner LIKE ? OR tags LIKE ? OR notes LIKE ? OR ref_number LIKE ? OR full_address LIKE ?)")
+        params += [q, q, q, q, q, q, q, q]
     if filters.get("status"):
         clauses.append("status=?")
         params.append(filters["status"])
@@ -193,6 +271,13 @@ st.markdown("""
     .status-qualified { background: #e8f5e8; color: #388e3c; }
     .status-won { background: #e8f5e8; color: #2e7d32; }
     .status-lost { background: #ffebee; color: #d32f2f; }
+    .address-display {
+        background: #f0f2f6;
+        padding: 0.5rem;
+        border-radius: 5px;
+        border-left: 3px solid #667eea;
+        margin: 0.5rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
@@ -200,7 +285,7 @@ st.markdown("""
 st.markdown("""
 <div class="main-header">
     <h1>🏢 Enhanced Lead Management CRM</h1>
-    <p>Comprehensive lead tracking with scheduling and analytics</p>
+    <p>Comprehensive lead tracking with scheduling, address management and analytics</p>
 </div>
 """, unsafe_allow_html=True)
 
@@ -217,6 +302,16 @@ with st.sidebar:
         email = st.text_input("Email", placeholder="contact@example.com")
         phone = st.text_input("Phone", placeholder="+1-234-567-8900")
         place = st.text_input("Company/Place", placeholder="Company name or location")
+        
+        st.subheader("Address Information")
+        street_address = st.text_input("Street Address", placeholder="123 Main Street")
+        col_addr1, col_addr2 = st.columns(2)
+        with col_addr1:
+            city = st.text_input("City", placeholder="New York")
+            zip_code = st.text_input("ZIP Code", placeholder="10001")
+        with col_addr2:
+            state = st.text_input("State", placeholder="NY")
+            country = st.text_input("Country", placeholder="USA")
         
         st.subheader("Lead Details")
         col1, col2 = st.columns(2)
@@ -254,6 +349,11 @@ with st.sidebar:
                         "email": email,
                         "phone": phone,
                         "place": place,
+                        "street_address": street_address,
+                        "city": city,
+                        "state": state,
+                        "zip_code": zip_code,
+                        "country": country,
                         "source": source,
                         "owner": owner,
                         "status": status,
@@ -280,7 +380,7 @@ with tab1:
     with st.container():
         col1, col2 = st.columns([2, 1])
         with col1:
-            q = st.text_input("🔍 Search leads...", placeholder="Search by name, email, company, reference number...")
+            q = st.text_input("🔍 Search leads...", placeholder="Search by name, email, company, reference number, address...")
         with col2:
             st.write("")  # spacing
     
@@ -354,6 +454,14 @@ with tab1:
                         📅 Created: {format_datetime(row['created_at'])}  
                         {preferred_info}
                         """, unsafe_allow_html=True)
+                        
+                        # Display address if available
+                        if row['full_address']:
+                            st.markdown(f"""
+                            <div class="address-display">
+                                📍 <strong>Address:</strong> {row['full_address']}
+                            </div>
+                            """, unsafe_allow_html=True)
                     
                     with col2:
                         st.markdown(f"**💰 ${row['value']:,.2f}**")
@@ -401,6 +509,17 @@ with tab1:
                                 new_status = st.selectbox("Status", STATUSES, index=STATUSES.index(row["status"]))
                                 new_value = st.number_input("Deal Value", min_value=0.0, step=100.0, value=float(row["value"]))
                             
+                            # Address fields
+                            st.subheader("Address Information")
+                            new_street_address = st.text_input("Street Address", value=row["street_address"] or "")
+                            col_addr1, col_addr2 = st.columns(2)
+                            with col_addr1:
+                                new_city = st.text_input("City", value=row["city"] or "")
+                                new_zip_code = st.text_input("ZIP Code", value=row["zip_code"] or "")
+                            with col_addr2:
+                                new_state = st.text_input("State", value=row["state"] or "")
+                                new_country = st.text_input("Country", value=row["country"] or "")
+                            
                             # Scheduling
                             col3, col4 = st.columns(2)
                             with col3:
@@ -432,6 +551,11 @@ with tab1:
                                         "email": new_email,
                                         "phone": new_phone,
                                         "place": new_place,
+                                        "street_address": new_street_address,
+                                        "city": new_city,
+                                        "state": new_state,
+                                        "zip_code": new_zip_code,
+                                        "country": new_country,
                                         "source": new_source,
                                         "owner": new_owner,
                                         "status": new_status,
@@ -499,12 +623,12 @@ with tab2:
                 st.bar_chart(source_counts)
 
             with col4:
-                st.subheader("Leads by Owner")
-                if df_all['owner'].notna().any():
-                    owner_counts = df_all[df_all['owner'].notna()]["owner"].value_counts()
-                    st.bar_chart(owner_counts)
+                st.subheader("Leads by Location")
+                if df_all['city'].notna().any():
+                    city_counts = df_all[df_all['city'].notna()]["city"].value_counts().head(10)
+                    st.bar_chart(city_counts)
                 else:
-                    st.info("No owner data available")
+                    st.info("No location data available")
     
     except Exception as e:
         st.error(f"❌ Error generating analytics: {str(e)}")
@@ -536,6 +660,8 @@ with tab3:
                         ptime = row['preferred_time'] if row['preferred_time'] else "No time set"
                         st.write(f"**{row['name']}** ({row['ref_number']})")
                         st.write(f"📧 {row['email']} | 📞 {row['phone']}")
+                        if row['full_address']:
+                            st.write(f"📍 {row['full_address']}")
                     
                     with col2:
                         st.write(f"📅 **{pdate}**")
@@ -564,7 +690,7 @@ with tab4:
                 st.download_button(
                     "📁 Download All Leads (CSV)",
                     csv_data,
-                    "enhanced_leads.csv",
+                    "enhanced_leads_with_address.csv",
                     "text/csv",
                     use_container_width=True
                 )
@@ -590,6 +716,19 @@ with tab4:
                     if "company" in new_df.columns and "place" not in new_df.columns:
                         new_df = new_df.rename(columns={"company": "place"})
                     
+                    # Map address columns if they exist under different names
+                    column_mapping = {
+                        "address": "street_address",
+                        "street": "street_address",
+                        "postal_code": "zip_code",
+                        "postcode": "zip_code",
+                        "zip": "zip_code"
+                    }
+                    
+                    for old_col, new_col in column_mapping.items():
+                        if old_col in new_df.columns and new_col not in new_df.columns:
+                            new_df = new_df.rename(columns={old_col: new_col})
+                    
                     # Remove existing ID column if present
                     if "id" in new_df.columns:
                         new_df = new_df.drop(columns=["id"])
@@ -607,6 +746,33 @@ with tab4:
                     # Ensure numeric value column
                     new_df["value"] = pd.to_numeric(new_df.get("value", 0), errors="coerce").fillna(0)
                     
+                    # Create full_address from components if not present
+                    if "full_address" not in new_df.columns:
+                        new_df["full_address"] = ""
+                        for idx, row in new_df.iterrows():
+                            full_addr = format_address(
+                                row.get("street_address"),
+                                row.get("city"),
+                                row.get("state"),
+                                row.get("zip_code"),
+                                row.get("country")
+                            )
+                            new_df.at[idx, "full_address"] = full_addr
+                    
+                    # Ensure all required columns exist with default values
+                    required_columns = [
+                        "street_address", "city", "state", "zip_code", "country",
+                        "place", "email", "phone", "source", "owner", "status",
+                        "tags", "notes", "preferred_date", "preferred_time"
+                    ]
+                    
+                    for col in required_columns:
+                        if col not in new_df.columns:
+                            new_df[col] = None
+                    
+                    # Set default status if not provided
+                    new_df["status"] = new_df["status"].fillna("New")
+                    
                     # Import to database
                     try:
                         with closing(sqlite3.connect(DB_PATH)) as conn:
@@ -621,13 +787,55 @@ with tab4:
             except Exception as e:
                 st.error(f"❌ Import failed: {e}")
 
+# Sample data generation section
+st.markdown("---")
+with st.expander("🎯 Generate Sample Data for Testing"):
+    st.write("Generate sample leads with addresses for testing purposes")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        num_samples = st.number_input("Number of sample leads", min_value=1, max_value=50, value=5)
+    with col2:
+        if st.button("🎲 Generate Sample Data", use_container_width=True):
+            try:
+                sample_data = [
+                    {
+                        "name": f"Sample Lead {i+1}",
+                        "email": f"lead{i+1}@example.com",
+                        "phone": f"+1-555-{1000+i:04d}",
+                        "place": f"Sample Company {i+1}",
+                        "street_address": f"{100+i*10} Sample Street",
+                        "city": ["New York", "Los Angeles", "Chicago", "Houston", "Phoenix"][i % 5],
+                        "state": ["NY", "CA", "IL", "TX", "AZ"][i % 5],
+                        "zip_code": f"{10001+i:05d}",
+                        "country": "USA",
+                        "source": SOURCES[i % len(SOURCES)],
+                        "owner": f"Owner {i % 3 + 1}",
+                        "status": STATUSES[i % len(STATUSES)],
+                        "value": (i + 1) * 1000,
+                        "tags": f"sample, test, lead{i+1}",
+                        "notes": f"This is a sample lead #{i+1} for testing purposes."
+                    }
+                    for i in range(num_samples)
+                ]
+                
+                for data in sample_data:
+                    add_lead(data)
+                
+                st.success(f"✅ Generated {num_samples} sample leads successfully!")
+                st.rerun()
+                
+            except Exception as e:
+                st.error(f"❌ Error generating sample data: {str(e)}")
+
 # Footer
 st.markdown("---")
 st.markdown(
     """
     <div style='text-align: center; color: #666; padding: 20px;'>
-        🏢 Enhanced Lead Management CRM | Built with Streamlit | 
-        Features: Lead tracking, Scheduling, Analytics, Import/Export
+        🏢 Enhanced Lead Management CRM with Address Management | Built with Streamlit<br>
+        Features: Lead tracking, Address management, Scheduling, Analytics, Import/Export<br>
+        Reference Format: GDC-XX-DDMMYYYY | Address Support: Street, City, State, ZIP, Country
     </div>
     """, 
     unsafe_allow_html=True
