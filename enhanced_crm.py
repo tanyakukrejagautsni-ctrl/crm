@@ -4,8 +4,6 @@ import json
 import os
 from datetime import datetime, date
 import sqlite3
-import plotly.express as px
-import plotly.graph_objects as go
 
 # Configure the page
 st.set_page_config(
@@ -271,6 +269,20 @@ st.markdown("""
     border-radius: 10px;
     margin-top: 1rem;
 }
+.success-box {
+    padding: 0.5rem;
+    background-color: #d4edda;
+    border: 1px solid #c3e6cb;
+    border-radius: 0.25rem;
+    color: #155724;
+}
+.info-box {
+    padding: 0.5rem;
+    background-color: #d1ecf1;
+    border: 1px solid #bee5eb;
+    border-radius: 0.25rem;
+    color: #0c5460;
+}
 </style>
 """, unsafe_allow_html=True)
 
@@ -349,13 +361,16 @@ if page == "🏠 Dashboard":
         else:
             st.info("No recent activities")
     
-    # Lead status distribution
+    # Lead status distribution using native Streamlit charts
     if not leads_df.empty:
         st.subheader("📊 Lead Status Distribution")
         status_counts = leads_df['status'].value_counts()
-        fig = px.pie(values=status_counts.values, names=status_counts.index, 
-                    title="Lead Status Distribution")
-        st.plotly_chart(fig, use_container_width=True)
+        st.bar_chart(status_counts)
+        
+        # Lead source distribution
+        st.subheader("📍 Lead Sources")
+        source_counts = leads_df['source'].value_counts()
+        st.bar_chart(source_counts)
 
 elif page == "➕ Add Lead":
     st.title("➕ Add New Lead")
@@ -516,8 +531,6 @@ elif page == "👥 View Leads":
     
     else:
         st.info("🔍 No leads found. Add your first lead to get started!")
-        if st.button("➕ Add First Lead"):
-            st.switch_page("Add Lead")
 
 elif page == "👤 Add Customer":
     st.title("👤 Add New Customer")
@@ -673,25 +686,19 @@ elif page == "📊 Analytics":
                 # Lead status distribution
                 st.subheader("📊 Lead Status Distribution")
                 status_counts = leads_df['status'].value_counts()
-                fig_pie = px.pie(values=status_counts.values, names=status_counts.index)
-                st.plotly_chart(fig_pie, use_container_width=True)
+                st.bar_chart(status_counts)
             
             with col2:
                 # Lead source analysis
                 st.subheader("📍 Lead Sources")
                 source_counts = leads_df['source'].value_counts()
-                fig_bar = px.bar(x=source_counts.index, y=source_counts.values)
-                fig_bar.update_layout(xaxis_title="Source", yaxis_title="Count")
-                st.plotly_chart(fig_bar, use_container_width=True)
+                st.bar_chart(source_counts)
             
             # Timeline analysis
             st.subheader("📅 Leads Over Time")
             leads_df['created_date'] = pd.to_datetime(leads_df['created_date'])
-            daily_leads = leads_df.groupby(leads_df['created_date'].dt.date).size().reset_index()
-            daily_leads.columns = ['Date', 'Count']
-            
-            fig_line = px.line(daily_leads, x='Date', y='Count', title='Daily Lead Creation')
-            st.plotly_chart(fig_line, use_container_width=True)
+            daily_leads = leads_df.groupby(leads_df['created_date'].dt.date).size()
+            st.line_chart(daily_leads)
             
             # Value analysis
             if leads_df['value'].sum() > 0:
@@ -700,10 +707,8 @@ elif page == "📊 Analytics":
                 
                 with col1:
                     # Value by status
-                    value_by_status = leads_df.groupby('status')['value'].sum().reset_index()
-                    fig_value = px.bar(value_by_status, x='status', y='value', 
-                                     title='Total Value by Lead Status')
-                    st.plotly_chart(fig_value, use_container_width=True)
+                    value_by_status = leads_df.groupby('status')['value'].sum()
+                    st.bar_chart(value_by_status)
                 
                 with col2:
                     # Top leads by value
@@ -737,8 +742,8 @@ elif page == "🔧 Data Management":
     
     # Data status
     st.subheader("💾 Data Persistence Status")
-    st.success("✅ SQLite Database - All data is permanently stored!")
-    st.info("🔒 Your data persists across sessions, browser refreshes, and app restarts!")
+    st.markdown('<div class="success-box">✅ SQLite Database - All data is permanently stored!</div>', unsafe_allow_html=True)
+    st.markdown('<div class="info-box">🔒 Your data persists across sessions, browser refreshes, and app restarts!</div>', unsafe_allow_html=True)
     
     # Database file info
     try:
